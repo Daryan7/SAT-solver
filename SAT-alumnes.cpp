@@ -28,7 +28,7 @@ uint indexOfNextLitToPropagate;
 uint decisionLevel;
 
 bool compare(Appearings left, Appearings right) {
-    if (left.appearings == right.appearings) return varRefsFalse[left.var].size() > varRefsFalse[right.var].size();
+    //if (left.appearings == right.appearings) return varRefsFalse[left.var].size() > varRefsFalse[right.var].size();
     return left.appearings > right.appearings;
 }
 
@@ -132,10 +132,10 @@ void backtrack() {
 
 // Heuristic for finding the next decision literal:
 int getNextDecisionLiteral() {
-    for (uint i = 0; i <= numVars; ++i) {
+    for (uint i = 0; i < numVars; ++i) {
         uint var = varApp[i].var;
-        //cout << var << " " << model[var] << endl;
-        if (model[var] == UNDEF) return var;//varRefsTrue[var].size() > varRefsFalse[var].size() ? -var : var;
+        if (model[var] == UNDEF) //return var;
+            return varRefsTrue[var].size() > varRefsFalse[var].size() ? -var : var;
     }
     return 0; // reurns 0 when all literals are defined
 }
