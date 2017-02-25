@@ -12,24 +12,27 @@ typedef unsigned int uint;
 #define TRUE 1
 #define FALSE 0
 
-struct Appearings {
-    uint var, appearings;
-};
-
 uint numVars;
 uint numClauses;
 vector<vector<int>> clauses;
 vector<vector<uint>> varRefsTrue;
 vector<vector<uint>> varRefsFalse;
-vector<Appearings> varApp;
+vector<uint> varApp;
+vector<vector<int>> propagMotive;
 vector<int> model;
 vector<int> modelStack;
 uint indexOfNextLitToPropagate;
 uint decisionLevel;
 
-bool compare(Appearings left, Appearings right) {
-    //if (left.appearings == right.appearings) return varRefsFalse[left.var].size() > varRefsFalse[right.var].size();
-    return left.appearings > right.appearings;
+bool compare(uint left, uint right) {
+    uint appLeft = varRefsFalse[left].size()+varRefsTrue[left].size();
+    uint appRight = varRefsFalse[right].size()+varRefsTrue[right].size();
+    if (appLeft == appRight) return varRefsFalse[left].size() > varRefsFalse[right].size();
+    return appLeft > appRight;
+}
+
+bool compare3(int left, int right) {
+    return abs(left) < abs(right);
 }
 
 void readClauses() {
@@ -45,11 +48,10 @@ void readClauses() {
     clauses.resize(numClauses);
     varRefsTrue = vector<vector<uint>>(numVars+1);
     varRefsFalse = vector<vector<uint>>(numVars+1);
-    varApp = vector<Appearings>(numVars);
+    varApp = vector<uint>(numVars);
 
     for (uint i = 0; i < numVars; ++i) {
-        varApp[i].var = i+1;
-        varApp[i].appearings = 0;
+        varApp[i] = i+1;
     }
     // Read clauses
     for (uint i = 0; i < numClauses; ++i) {
@@ -58,17 +60,15 @@ void readClauses() {
             clauses[i].push_back(lit);
             if (lit > 0) {
                 varRefsTrue[lit].push_back(i);
-                varApp[lit-1].appearings++;
             }
             else {
                 varRefsFalse[-lit].push_back(i);
-                varApp[-lit-1].appearings++;
             }
         }
+        sort(clauses[i].begin(), clauses[i].end(), compare3);
     }
 
     sort(varApp.begin(), varApp.end(), compare);
-    //for (Appearings x : varApp) cout << x.lit << " " << x.appearings << endl;
 }
 
 int currentValueInModel(int lit) {
@@ -81,7 +81,7 @@ void setLiteralToTrue(int lit) {
     else model[-lit] = FALSE;
 }
 
-bool propagateGivesConflict() {
+bool propagateGivesConflict(uint& cause) {
     while (indexOfNextLitToPropagate < modelStack.size()) {
         int litToPropagate = modelStack[indexOfNextLitToPropagate];
         ++indexOfNextLitToPropagate;
@@ -96,19 +96,25 @@ bool propagateGivesConflict() {
             vec = &varRefsTrue[-litToPropagate][0];
             size = varRefsTrue[-litToPropagate].size();
         }
-
         for (uint i = 0; i < size; ++i) {
             bool someLitTrue = false;
             int numUndefs = 0;
             int lastLitUndef = 0;
-            int clause = vec[i];
+            uint clause = *vec;
+            ++vec;
             for (uint k = 0; not someLitTrue and k < clauses[clause].size(); ++k) {
                 int val = currentValueInModel(clauses[clause][k]);
                 if (val == TRUE) someLitTrue = true;
                 else if (val == UNDEF) {++numUndefs;lastLitUndef = clauses[clause][k];}
             }
-            if (not someLitTrue and numUndefs == 0) return true; // conflict! all lits false
-            else if (not someLitTrue and numUndefs == 1) setLiteralToTrue(lastLitUndef);
+            if (not someLitTrue and numUndefs == 0) {
+                cause = clause;
+                return true; // conflict! all lits false
+            }
+            else if (not someLitTrue and numUndefs == 1) {
+                propagMotive[abs(lastLitUndef)] = clauses[clause];
+                setLiteralToTrue(lastLitUndef);
+            }
         }
     }
     return false;
@@ -130,12 +136,133 @@ void backtrack() {
     setLiteralToTrue(-lit);  // reverse last decision
 }
 
+void backjump(uint clauseOfConflict) {
+    vector<int> clauseConflict = clauses[clauseOfConflict];
+#ifdef DEBUG
+    cout << "BackJumping" << endl;
+    for (int x : clauseConflict) cout << x << " ";
+    cout << endl;
+    for (int x : modelStack) cout << x << " ";
+    cout << endl << endl;
+    uint count = 0;
+#endif
+    int found = 0;
+    uint numFalseLits = 0;
+    uint i;
+    int lit;
+    for (i = modelStack.size()-1, lit = modelStack[i]; lit != 0; --i, lit = modelStack[i]) {
+        for (int x : clauseConflict) {
+            if (x == -lit) {
+                if (not found) found = lit;
+                ++numFalseLits;
+            }
+        }
+    }
+    while (numFalseLits > 1) {
+       // vector<int>& cause = clauses[propagMotive[abs(found)]];
+        vector<int>& cause = propagMotive[abs(found)];
+#ifdef DEBUG
+        for (int x : cause) cout << x << " ";
+        cout << endl;
+        for (int x : clauseConflict) cout << x << " ";
+        cout << endl;
+#endif
+        vector<int> aux;
+        aux.reserve(clauseConflict.size()+cause.size()-1);
+
+        i = 0;
+        uint j = 0;
+        while (i < clauseConflict.size() and j < cause.size()) {
+            uint litLeft = abs(clauseConflict[i]);
+            uint litRight = abs(cause[j]);
+
+            if (litLeft < litRight) {
+                aux.push_back(clauseConflict[i]);
+                ++i;
+            }
+            else if (litLeft > litRight) {
+                aux.push_back(cause[j]);
+                ++j;
+            }
+            else {
+                if (clauseConflict[i] == cause[j]) {
+                    aux.push_back(cause[j]);
+                }
+                ++i;++j;
+            }
+        }
+        while (i < clauseConflict.size()) {
+           aux.push_back(clauseConflict[i]);
+           ++i;
+        }
+        while (j < cause.size()) {
+            aux.push_back(cause[j]);
+            ++j;
+        }
+
+        found = 0;
+        numFalseLits = 0;
+        for (uint j = modelStack.size()-1; modelStack[j] != 0; --j) {
+            int lit = modelStack[j];
+            for (int x : aux) {
+                if (x == -lit) {
+                    if (not found) found = lit;
+                    ++numFalseLits;
+                }
+            }
+        }
+#ifdef DEBUG
+        cout << "RESULT" << endl;
+        for (int x : aux) cout << x << " ";
+        cout << endl;
+        cout << "Found " << found << endl << endl;;
+        //if (count == 20) exit(-1);
+        ++count;
+#endif
+        clauseConflict = aux;
+    }
+
+    i = modelStack.size()-1;
+    bool eq = false;
+    bool trigger = false;
+    while (not eq) {
+        int lit = modelStack[i];
+        for (int x : clauseConflict) {
+            if (abs(x) == abs(lit) and trigger) {
+                eq = true;
+            }
+        }
+        if (not eq) {
+            if (lit != 0) model[abs(lit)] = UNDEF;
+            else {
+                trigger = true;
+                --decisionLevel;
+            }
+            modelStack.pop_back();
+            --i;
+        }
+    }
+    propagMotive[abs(found)] = clauseConflict;
+    clauses.push_back(clauseConflict);
+    for (int x : clauseConflict) {
+        if (x > 0) varRefsTrue[x].push_back(clauses.size()-1);
+        else varRefsFalse[-x].push_back(clauses.size()-1);
+    }
+    indexOfNextLitToPropagate = modelStack.size();
+    setLiteralToTrue(-found);
+#ifdef DEBUG
+    cout << "After back jumping" << endl;
+    for (int x : modelStack) cout << x << " ";
+    cout << endl;
+#endif
+}
+
 // Heuristic for finding the next decision literal:
 int getNextDecisionLiteral() {
     for (uint i = 0; i < numVars; ++i) {
-        uint var = varApp[i].var;
-        if (model[var] == UNDEF) //return var;
-            return varRefsTrue[var].size() > varRefsFalse[var].size() ? -var : var;
+        uint var = varApp[i];
+        if (model[var] == UNDEF) return var;
+            //return varRefsTrue[var].size() > varRefsFalse[var].size() ? -var : var;
     }
     return 0; // reurns 0 when all literals are defined
 }
@@ -155,14 +282,14 @@ void checkmodel() {
 }
 
 int main() {
+    timeval start, end;
+    gettimeofday(&start, NULL);
+
     readClauses(); // reads numVars, numClauses and clauses
     model.resize(numVars+1, UNDEF);
+    propagMotive = vector<vector<int>>(numVars+1);
     indexOfNextLitToPropagate = 0;
     decisionLevel = 0;
-
-    timeval start, end;
-
-    gettimeofday(&start, NULL);
 
     // Take care of initial unit clauses, if any
     for (uint i = 0; i < numClauses; ++i)
@@ -170,9 +297,9 @@ int main() {
             int lit = clauses[i][0];
             int val = currentValueInModel(lit);
             if (val == FALSE) {
-                cout << "UNSATISFIABLE" << endl;
                 gettimeofday(&end, NULL);
                 cout << (end.tv_sec+((double)end.tv_usec/1000000))-(start.tv_sec+((double)start.tv_usec/1000000)) << endl;
+                cout << "UNSATISFIABLE" << endl;
                 return 10;
             }
             else if (val == UNDEF) setLiteralToTrue(lit);
@@ -180,20 +307,22 @@ int main() {
 
     // DPLL algorithm
     while (true) {
-        while (propagateGivesConflict()) {
+        uint cause;
+        while (propagateGivesConflict(cause)) {
             if (decisionLevel == 0) {
-                cout << "UNSATISFIABLE" << endl;
                 gettimeofday(&end, NULL);
                 cout << (end.tv_sec+((double)end.tv_usec/1000000))-(start.tv_sec+((double)start.tv_usec/1000000)) << endl;
+                cout << "UNSATISFIABLE" << endl;
                 return 10;
             }
-            backtrack();
+            backjump(cause);
+            //backtrack();
         }
         int decisionLit = getNextDecisionLiteral();
         if (decisionLit == 0) {
-            checkmodel(); cout << "SATISFIABLE" << endl;
             gettimeofday(&end, NULL);
             cout << (end.tv_sec+((double)end.tv_usec/1000000))-(start.tv_sec+((double)start.tv_usec/1000000)) << endl;
+            checkmodel(); cout << "SATISFIABLE" << endl;
             return 20;
         }
         // start new decision level:
