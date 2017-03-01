@@ -84,6 +84,9 @@ void setLiteralToTrue(int lit) {
 bool propagateGivesConflict(uint& cause) {
     while (indexOfNextLitToPropagate < modelStack.size()) {
         int litToPropagate = modelStack[indexOfNextLitToPropagate];
+#ifdef DEBUG
+        cout << "Propagating " << litToPropagate << endl;
+#endif
         ++indexOfNextLitToPropagate;
 
         uint* vec;
@@ -113,6 +116,11 @@ bool propagateGivesConflict(uint& cause) {
             }
             else if (not someLitTrue and numUndefs == 1) {
                 propagMotive[abs(lastLitUndef)] = clauses[clause];
+#ifdef DEBUG
+                cout << "Propagated " << lastLitUndef << " " << clause << " " << clauses.size() << endl;
+                for (int x : clauses[clause]) cout << x << " ";
+                cout << endl;
+#endif
                 setLiteralToTrue(lastLitUndef);
             }
         }
@@ -215,11 +223,49 @@ void backjump(uint clauseOfConflict) {
         cout << "RESULT" << endl;
         for (int x : aux) cout << x << " ";
         cout << endl;
-        cout << "Found " << found << endl << endl;;
+        cout << "Found " << found << " num false lits " << numFalseLits << endl;
         //if (count == 20) exit(-1);
         ++count;
 #endif
         clauseConflict = aux;
+    }
+
+    clauses.push_back(clauseConflict);
+    for (int x : clauseConflict) {
+        if (x > 0) varRefsTrue[x].push_back(clauses.size()-1);
+        else varRefsFalse[-x].push_back(clauses.size()-1);
+    }
+
+    if (clauseConflict.size() == 1) {
+        //cout << "Emptying stack" << endl;
+        i = modelStack.size()-1;
+        while (i > 0) {
+            int lit = modelStack[i];
+            model[abs(lit)] = UNDEF;
+            modelStack.pop_back();
+            --i;
+        }
+
+        decisionLevel = 1;
+        //cout << "Propagating 1 lit clause" << endl;
+        // Take care of initial unit clauses, if any
+        for (uint j = 0; j < clauses.size(); ++j) {
+            if (clauses[j].size() == 1) {
+                //cout << j << " Has one lit: " << clauses[j][0];
+                int lit = clauses[j][0];
+                int val = currentValueInModel(lit);
+                if (val == FALSE) {
+                    //gettimeofday(&end, NULL);
+                   // cout << (end.tv_sec+((double)end.tv_usec/1000000))-(start.tv_sec+((double)start.tv_usec/1000000)) << endl;
+                    cout << "UNSATISFIABLE" << endl;
+                    exit(10);
+                }
+                else if (val == UNDEF) setLiteralToTrue(lit);
+            }
+        }
+        indexOfNextLitToPropagate = modelStack.size()-1;
+        //cout << "New index " << indexOfNextLitToPropagate << endl;
+        return;
     }
 
     i = modelStack.size()-1;
@@ -242,14 +288,9 @@ void backjump(uint clauseOfConflict) {
             --i;
         }
     }
-    propagMotive[abs(found)] = clauseConflict;
-    clauses.push_back(clauseConflict);
-    for (int x : clauseConflict) {
-        if (x > 0) varRefsTrue[x].push_back(clauses.size()-1);
-        else varRefsFalse[-x].push_back(clauses.size()-1);
-    }
-    indexOfNextLitToPropagate = modelStack.size();
-    setLiteralToTrue(-found);
+    //propagMotive[abs(found)] = clauseConflict;
+    indexOfNextLitToPropagate = modelStack.size()-1;
+    //setLiteralToTrue(-found);
 #ifdef DEBUG
     cout << "After back jumping" << endl;
     for (int x : modelStack) cout << x << " ";
